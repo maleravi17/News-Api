@@ -16,9 +16,11 @@ app = FastAPI()
 
 # Configure Gemini API
 try:
-    ##GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or "YOUR_GEMINI_API_KEY"  # Replace with your key or use env variable
-    GEMINI_API_KEY="AIzaSyB1liOmkD_MUtLaG502T24D4_mFi1hqItw"
-    genai.configure(api_key=GEMINI_API_KEY)
+    GOOGLE_API_KEY = os.getenv("GEMINI_API_KEY_1")
+    if not GOOGLE_API_KEY:
+        logger.error("GEMINI_API_KEY_1 environment variable is missing")
+        raise Exception("GEMINI_API_KEY_1 is required")
+    genai.configure(api_key=GOOGLE_API_KEY)
     model = genai.GenerativeModel("gemini-2.5-pro")
 except Exception as e:
     logger.error(f"Failed to configure Gemini API: {e}")
@@ -36,7 +38,7 @@ async def fetch_news_links(query: str) -> List[Dict[str, str]]:
         Summarize this query to a topic and focus on topic-related websites, reputable sources like LiveLaw, Bar & Bench, The Hindu (legal section), or IndianKanoon etc.
         Return the response as a JSON list of objects, each containing:
         - "title": The article or website title
-        - "link": The full URL,starting with https://
+        - "link": The full URL, starting with https://
         Ensure links are valid and point to specific articles or relevant legal news pages.
         Do not include non-legal or outdated sources.
         """
