@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Set up logging
+# Set up logging with a simple format to avoid f-string issues
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -32,16 +32,16 @@ def initialize_gemini():
     global current_key_index
     try:
         if not API_KEYS[current_key_index]:
-            logger.error(f"API key at index {current_key_index} is missing")
+            logger.error("Missing API key at index %s", current_key_index)
             raise Exception(f"API key at index {current_key_index} is required")
-        logger.info(f"Using API key at index {current_key_index}")
+        logger.info("Using API key at index %s", current_key_index)
         genai.configure(api_key=API_KEYS[current_key_index])
         logger.info("Gemini API configured successfully")
         model = genai.GenerativeModel("gemini-2.0-flash-001")
         logger.info("Gemini model initialized successfully")
         return model
     except Exception as e:
-        logger.error(f"Failed to configure Gemini API with key at index {current_key_index}: {e}")
+        logger.error("Failed to configure Gemini API with key at index %s: %s", current_key_index, str(e))
         raise
 
 def rotate_key():
@@ -49,7 +49,7 @@ def rotate_key():
     global current_key_index
     if current_key_index < len(API_KEYS) - 1:
         current_key_index += 1
-        logger.info(f"Rotating to API key at index {current_key_index}")
+        logger.info("Rotating to API key at index %s", current_key_index)
         return initialize_gemini()
     else:
         logger.error("All API keys have been used")
@@ -59,7 +59,7 @@ def rotate_key():
 try:
     model = initialize_gemini()
 except Exception as e:
-    logger.error(f"Initial Gemini API configuration failed: {e}")
+    logger.error("Initial Gemini API configuration failed: %s", str(e))
     raise Exception("Gemini API configuration failed")
 
 # Root endpoints
@@ -75,16 +75,15 @@ async def root_head():
 class UserQuery(BaseModel):
     text: str
 
-# Function to fetch news links using Gemini API
 async def fetch_news_links(query: str) -> List[Dict[str, str]]:
     global model
     attempts = 0
-    max_attempts = len(API_KEYS)
+    max_attempts = len(API_KEYS) if API_KEYS else 1
     
     while attempts < max_attempts:
         try:
-            prompt = f"""
-            Perform a web search for up to 15 recent Indian law news articles or legal websites relevant to the query: "{query}".
+            prompt = """
+            Perform a web search for up to 15 recent Indian law news articles or legal websites relevant to the query: "{}".
             Focus on reputable sources like LiveLaw, Bar & Bench, The Hindu (legal section), or IndianKanoon, published within the last 6 months.
             Return the response as a valid JSON list of objects, each containing:
             - "title": The article or website title
@@ -93,21 +92,21 @@ async def fetch_news_links(query: str) -> List[Dict[str, str]]:
             Do not include non-legal or outdated sources.
             Format the response strictly as a JSON list, enclosed in square brackets, like: [{"title": "example", "link": "https://example.com"}, ...]
             If no articles are found, return an empty JSON list: []
-            """
+            """.format(query)
             response = model.generate_content(prompt)
             if not response.text:
-                logger.error("Gemini API returned empty response")
+                logger.error("Gemini API returned empty response for query: %s", query)
                 return []
             
             # Log the raw response for debugging
-            logger.info(f"Gemini API response: {response.text}")
+            logger.info("Gemini API response for query %s: %s", query, response.text)
             
             # Parse JSON response
             try:
                 cleaned_response = response.text.strip("```json\n```").strip()
                 articles = json.loads(cleaned_response)
                 if not isinstance(articles, list):
-                    logger.error(f"Gemini API response is not a valid JSON list: {cleaned_response}")
+                    logger.error("Gemini API response is not a valid JSON list for query %s: %s", query, cleaned_response)
                     return []
                 
                 # Validate and clean articles
@@ -119,17 +118,17 @@ async def fetch_news_links(query: str) -> List[Dict[str, str]]:
                         if re.match(r"https?://", link):
                             valid_articles.append({"title": title, "link": link})
                         else:
-                            logger.warning(f"Invalid URL skipped: {link}")
+                            logger.warning("Invalid URL skipped for query %s: %s", query, link)
                     else:
-                        logger.warning(f"Invalid article format: {article}")
+                        logger.warning("Invalid article format for query %s: %s", query, str(article))
                 
-                logger.info(f"Fetched {len(valid_articles)} valid articles from Gemini API")
+                logger.info("Fetched %s valid articles from Gemini API for query %s", len(valid_articles), query)
                 return valid_articles
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse Gemini API response as JSON: {e}, Raw response: {response.text}")
+                logger.error("Failed to parse Gemini API response as JSON for query %s: %s, Raw response: %s", query, str(e), response.text)
                 return []
         except Exception as e:
-            logger.error(f"Error fetching news from Gemini API: {e}, Query: {query}")
+            logger.error("Error fetching news from Gemini API for query %s: %s", query, str(e))
             attempts += 1
             if attempts < max_attempts:
                 model = rotate_key()
@@ -137,11 +136,10 @@ async def fetch_news_links(query: str) -> List[Dict[str, str]]:
             return []
     return []
 
-# Function to rank articles based on query
 def rank_articles(query: str, articles: List[Dict[str, str]]) -> List[Dict[str, str]]:
     try:
         if not articles:
-            logger.warning("No articles to rank")
+            logger.warning("No articles to rank for query %s", query)
             return []
         
         titles = [article["title"] for article in articles]
@@ -159,10 +157,10 @@ def rank_articles(query: str, articles: List[Dict[str, str]]) -> List[Dict[str, 
             ranked_articles.append({"title": titles[idx], "link": links[idx], "score": float(sim)})
         
         ranked_articles.sort(key=lambda x: x["score"], reverse=True)
-        logger.info(f"Ranked {len(ranked_articles)} articles for query: {query}")
+        logger.info("Ranked %s articles for query %s", len(ranked_articles), query)
         return [{"title": article["title"], "link": article["link"]} for article in ranked_articles[:10]]
     except Exception as e:
-        logger.error(f"Error ranking articles: {e}")
+        logger.error("Error ranking articles for query %s: %s", query, str(e))
         return []
 
 @app.post("/recommend", response_model=List[Dict[str, str]])
@@ -176,21 +174,21 @@ async def recommend_news(query: UserQuery):
         articles = await fetch_news_links(query.text)
         
         if not articles:
-            logger.warning("No articles fetched from Gemini API, returning empty list")
+            logger.warning("No articles fetched from Gemini API for query %s", query.text)
             return []
         
         # Rank articles
         ranked_articles = rank_articles(query.text, articles)
         
         if not ranked_articles:
-            logger.warning("No relevant articles found for query")
+            logger.warning("No relevant articles found for query %s", query.text)
             return []
         
         return ranked_articles
     except HTTPException as e:
         raise e
     except Exception as e:
-        logger.error(f"Unexpected error in recommend_news: {e}")
+        logger.error("Unexpected error in recommend_news for query %s: %s", query.text, str(e))
         raise HTTPException(status_code=500, detail="Internal server error")
 
 if __name__ == "__main__":
