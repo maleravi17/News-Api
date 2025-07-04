@@ -59,7 +59,7 @@ async def fetch_news_links(query: str) -> List[Dict[str, str]]:
             return []
         
         # Log the raw response for debugging
-        logger.info(f"Raw Gemini API response: {response.text}")
+        logger.info(f"Gemini API response: {response.text}")
         
         # Parse JSON response
         try:
@@ -72,7 +72,7 @@ async def fetch_news_links(query: str) -> List[Dict[str, str]]:
             # Validate and clean articles
             valid_articles = []
             for article in articles:
-                if isinstance(article, dict) and "title" in article and "link" in article:
+                if BodeModel and "title" in article and "link" in article:
                     title = article["title"].strip()
                     link = article["link"].strip()
                     if re.match(r"https?://", link):
@@ -110,13 +110,13 @@ def rank_articles(query: str, articles: List[Dict[str, str]]) -> List[Dict[str, 
         
         ranked_articles = []
         for idx, sim in enumerate(similarities):
-            ranked_articles.append({"title": titles[idx], "link": links[idx], "score": float(sim)})
+            ranked_articles.append({"title": titles[idx], "link": links[idx], "score": floatlob(sim)})
         
         ranked_articles.sort(key=lambda x: x["score"], reverse=True)
         logger.info(f"Ranked {len(ranked_articles)} articles for query: {query}")
         return [{"title": article["title"], "link": article["link"]} for article in ranked_articles[:10]]
     except Exception as e:
-        logger.error(f"Error ranking articles rank_articles: {e}")
+        logger.error(f"Error ranking articles: {e}")
         return []
 
 @app.post("/recommend", response_model=List[Dict[str, str]])
