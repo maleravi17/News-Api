@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Set up logging with a simple format to avoid f-string issues
+# Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -26,22 +26,22 @@ API_KEYS = [
     os.getenv("GEMINI_API_KEY_3")
 ]
 current_key_index = 0
+current_model_name = "gemini-2.0-flash-001"
 
 def initialize_gemini():
-    """Initialize Gemini API with the current API key."""
-    global current_key_index
+    """Initialize Gemini API with the current API key and model."""
+    global current_key_index, current_model_name
     try:
         if not API_KEYS[current_key_index]:
             logger.error("Missing API key at index %s", current_key_index)
-            raise Exception(f"API key at index {current_key_index} is required")
-        logger.info("Using API key at index %s", current_key_index)
+            raise Exception("API key missing")
+        logger.info("Using API key at index %s for model %s", current_key_index, current_model_name)
         genai.configure(api_key=API_KEYS[current_key_index])
-        logger.info("Gemini API configured successfully")
-        model = genai.GenerativeModel("gemini-2.0-flash-001")
-        logger.info("Gemini model initialized successfully")
+        model = genai.GenerativeModel(current_model_name)
+        logger.info("Gemini model %s initialized successfully", current_model_name)
         return model
     except Exception as e:
-        logger.error("Failed to configure Gemini API with key at index %s: %s", current_key_index, str(e))
+        logger.error("Failed to initialize Gemini API with key at index %s for model %s: %s", current_key_index, current_model_name, str(e))
         raise
 
 def rotate_key():
@@ -53,7 +53,7 @@ def rotate_key():
         return initialize_gemini()
     else:
         logger.error("All API keys have been used")
-        raise HTTPException(status_code=500, detail="All API keys have been used. Please add more keys.")
+        raise HTTPException(status_code=500, detail="All API keys exhausted")
 
 # Initialize Gemini API
 try:
@@ -76,64 +76,76 @@ class UserQuery(BaseModel):
     text: str
 
 async def fetch_news_links(query: str) -> List[Dict[str, str]]:
-    global model
+    global model, current_model_name
     attempts = 0
-    max_attempts = len(API_KEYS) if API_KEYS else 1
+    max_attempts = max(len(API_KEYS), 1)
+    models_to_try = ["gemini-2.0-flash-001", "gemini-1.5-pro"]
     
-    while attempts < max_attempts:
-        try:
-            prompt = """
-            Perform a web search for up to 15 recent Indian law news articles or legal websites relevant to the query: "{}".
-            Focus on reputable sources like LiveLaw, Bar & Bench, The Hindu (legal section), or IndianKanoon, published within the last 6 months.
-            Return the response as a valid JSON list of objects, each containing:
-            - "title": The article or website title
-            - "link": The full URL, starting with https://
-            Ensure links are valid and point to specific articles or relevant legal news pages.
-            Do not include non-legal or outdated sources.
-            Format the response strictly as a JSON list, enclosed in square brackets, like: [{"title": "example", "link": "https://example.com"}, ...]
-            If no articles are found, return an empty JSON list: []
-            """.format(query)
-            response = model.generate_content(prompt)
-            if not response.text:
-                logger.error("Gemini API returned empty response for query: %s", query)
-                return []
-            
-            # Log the raw response for debugging
-            logger.info("Gemini API response for query %s: %s", query, response.text)
-            
-            # Parse JSON response
+    for model_name in models_to_try:
+        current_model_name = model_name
+        logger.info("Attempting to fetch news with model %s", current_model_name)
+        model = initialize_gemini()
+        attempts = 0
+        
+        while attempts < max_attempts:
             try:
-                cleaned_response = response.text.strip("```json\n```").strip()
-                articles = json.loads(cleaned_response)
-                if not isinstance(articles, list):
-                    logger.error("Gemini API response is not a valid JSON list for query %s: %s", query, cleaned_response)
+                prompt = """
+                Perform a web search for up to 15 recent Indian law news articles relevant to the query: "{}".
+                Focus on reputable sources like LiveLaw, Bar & Bench, The Hindu, or IndianKanoon, published within the last 6 months.
+                Return a JSON list of objects, each containing:
+                - "title": The article title
+                - "link": The full URL, starting with https://
+                Ensure links are valid and point to specific articles.
+                Format as a JSON list: [{"title": "example", "link": "https://example.com"}, ...]
+                If no articles are found, return: []
+                """.format(query)
+                logger.info("Sending prompt to Gemini API for query %s", query)
+                response = model.generate_content(prompt)
+                
+                if not response.text:
+                    logger.error("Gemini API returned empty response for query %s with model %s", query, current_model_name)
                     return []
                 
-                # Validate and clean articles
-                valid_articles = []
-                for article in articles:
-                    if isinstance(article, dict) and "title" in article and "link" in article:
-                        title = article["title"].strip()
-                        link = article["link"].strip()
-                        if re.match(r"https?://", link):
-                            valid_articles.append({"title": title, "link": link})
-                        else:
-                            logger.warning("Invalid URL skipped for query %s: %s", query, link)
-                    else:
-                        logger.warning("Invalid article format for query %s: %s", query, str(article))
+                # Log raw response
+                logger.info("Gemini API raw response for query %s with model %s: %s", query, current_model_name, response.text)
                 
-                logger.info("Fetched %s valid articles from Gemini API for query %s", len(valid_articles), query)
-                return valid_articles
-            except json.JSONDecodeError as e:
-                logger.error("Failed to parse Gemini API response as JSON for query %s: %s, Raw response: %s", query, str(e), response.text)
-                return []
-        except Exception as e:
-            logger.error("Error fetching news from Gemini API for query %s: %s", query, str(e))
-            attempts += 1
-            if attempts < max_attempts:
-                model = rotate_key()
-                continue
+                # Parse JSON response
+                try:
+                    cleaned_response = response.text.strip("```json\n```").strip()
+                    articles = json.loads(cleaned_response)
+                    if not isinstance(articles, list):
+                        logger.error("Gemini API response is not a JSON list for query %s with model %s: %s", query, current_model_name, cleaned_response)
+                        return []
+                    
+                    # Validate articles
+                    valid_articles = []
+                    for article in articles:
+                        if isinstance(article, dict) and "title" in article and "link" in article:
+                            title = article["title"].strip()
+                            link = article["link"].strip()
+                            if re.match(r"https?://", link):
+                                valid_articles.append({"title": title, "link": link})
+                            else:
+                                logger.warning("Invalid URL skipped for query %s: %s", query, link)
+                        else:
+                            logger.warning("Invalid article format for query %s: %s", query, str(article))
+                    
+                    logger.info("Fetched %s valid articles for query %s with model %s", len(valid_articles), query, current_model_name)
+                    return valid_articles
+                except json.JSONDecodeError as e:
+                    logger.error("Failed to parse Gemini API response for query %s with model %s: %s, Raw response: %s", query, current_model_name, str(e), response.text)
+                    return []
+            except Exception as e:
+                logger.error("Error fetching news from Gemini API for query %s with model %s: %s", query, current_model_name, str(e))
+                attempts += 1
+                if attempts < max_attempts:
+                    model = rotate_key()
+                    continue
+                break
+        if model_name == models_to_try[-1]:
+            logger.error("All models and API keys failed for query %s", query)
             return []
+    
     return []
 
 def rank_articles(query: str, articles: List[Dict[str, str]]) -> List[Dict[str, str]]:
