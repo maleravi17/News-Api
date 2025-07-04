@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import google.generativeai as genai
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -9,17 +10,19 @@ import re
 import json
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format="%( asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Root endpoint with HEAD support
-@app.route("/", methods=["GET", "HEAD"])
-async def root(request: Request):
-    if request.method == "HEAD":
-        return {}
+# Root endpoints
+@app.get("/")
+async def root():
     return {"message": "Welcome to the Indian Law News Recommendation API"}
+
+@app.head("/")
+async def root_head():
+    return JSONResponse(content={}, status_code=200)
 
 # Configure Gemini API
 try:
@@ -60,7 +63,6 @@ async def fetch_news_links(query: str) -> List[Dict[str, str]]:
         
         # Parse JSON response
         try:
-            # Strip code block markers if present
             cleaned_response = response.text.strip("```json\n```").strip()
             articles = json.loads(cleaned_response)
             if not isinstance(articles, list):
@@ -86,7 +88,7 @@ async def fetch_news_links(query: str) -> List[Dict[str, str]]:
             logger.error(f"Failed to parse Gemini API response as JSON: {e}, Raw response: {response.text}")
             return []
     except Exception as e:
-        logger.error(f"Error fetching news from Gemini API: D{e}")
+        logger.error(f"Error fetching news from Gemini API: {e}")
         return []
 
 # Function to rank articles based on query
@@ -128,15 +130,15 @@ async def recommend_news(query: UserQuery):
         articles = await fetch_news_links(query.text)
         
         if not articles:
-            logger.error("No articles fetched from Gemini API")
-            raise HTTPException(status_code=500, detail="Failed to fetch news articles")
+            logger.warning("No articles fetched from Gemini API, returning empty list")
+            return []
         
         # Rank articles
         ranked_articles = rank_articles(query.text, articles)
         
         if not ranked_articles:
             logger.warning("No relevant articles found for query")
-            raise HTTPException(status_code=404, detail="No relevant articles found")
+            return []
         
         return ranked_articles
     except HTTPException as e:
