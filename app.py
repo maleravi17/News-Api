@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from pydantic import Field
 import google.generativeai as genai
 from sklearn.feature_extraction.text import TfidfVectorizer
 from typing import List, Dict
@@ -8,14 +7,10 @@ import logging
 import os
 import re
 import json
-from dotenv import load_dotenv
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-# Load environment variables from .env file
-load_dotenv()
 
 app = FastAPI()
 
@@ -33,7 +28,7 @@ except Exception as e:
 
 # Pydantic model for input payload
 class UserQuery(BaseModel):
-    text: str = Field(..., min_length=1, max_length=500)
+    text: str
 
 # Function to fetch news links using Gemini API
 async def fetch_news_links(query: str) -> List[Dict[str, str]]:
@@ -109,14 +104,6 @@ def rank_articles(query: str, articles: List[Dict[str, str]]) -> List[Dict[str, 
         logger.error(f"Error ranking articles: {e}")
         return []
 
-@app.get("/")
-async def root():
-    return {"message": "Welcome to the Indian Legal News API. Use POST /recommend to fetch articles."}
-
-@app.get("/favicon.ico")
-async def favicon():
-    raise HTTPException(status_code=204)  # No Content
-
 @app.post("/recommend", response_model=List[Dict[str, str]])
 async def recommend_news(query: UserQuery):
     try:
@@ -147,5 +134,4 @@ async def recommend_news(query: UserQuery):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8005))  # Use Render's PORT or 8005 locally
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=8005)
