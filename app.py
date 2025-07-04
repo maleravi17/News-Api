@@ -88,7 +88,7 @@ async def fetch_news_links(query: str) -> List[Dict[str, str]]:
             logger.error(f"Failed to parse Gemini API response as JSON: {e}, Raw response: {response.text}")
             return []
     except Exception as e:
-        logger.error(f"Error fetching news from Gemini API: {e}")
+        logger.error(f"Error fetching news from Gemini API: {e}, Query: {query}")
         return []
 
 # Function to rank articles based on query
@@ -116,7 +116,7 @@ def rank_articles(query: str, articles: List[Dict[str, str]]) -> List[Dict[str, 
         logger.info(f"Ranked {len(ranked_articles)} articles for query: {query}")
         return [{"title": article["title"], "link": article["link"]} for article in ranked_articles[:10]]
     except Exception as e:
-        logger.error(f"Error ranking articles: {e}")
+        logger.error(f"Error ranking articles rank_articles: {e}")
         return []
 
 @app.post("/recommend", response_model=List[Dict[str, str]])
