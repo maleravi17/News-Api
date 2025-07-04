@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
+# Add root endpoint
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the Indian Law News Recommendation API"}
+
 # Configure Gemini API
 try:
     GOOGLE_API_KEY = os.getenv("GEMINI_API_KEY_1")
