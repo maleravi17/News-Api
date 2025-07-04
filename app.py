@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 import google.generativeai as genai
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -9,14 +9,16 @@ import re
 import json
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO, format="%( asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Add root endpoint
-@app.get("/")
-async def root():
+# Root endpoint with HEAD support
+@app.route("/", methods=["GET", "HEAD"])
+async def root(request: Request):
+    if request.method == "HEAD":
+        return {}
     return {"message": "Welcome to the Indian Law News Recommendation API"}
 
 # Configure Gemini API
@@ -46,17 +48,23 @@ async def fetch_news_links(query: str) -> List[Dict[str, str]]:
         - "link": The full URL, starting with https://
         Ensure links are valid and point to specific articles or relevant legal news pages.
         Do not include non-legal or outdated sources.
+        Format the response as a valid JSON list, enclosed in square brackets, like: [{"title": "example", "link": "https://example.com"}, ...]
         """
         response = model.generate_content(prompt)
         if not response.text:
             logger.error("Gemini API returned empty response")
             return []
         
+        # Log the raw response for debugging
+        logger.info(f"Raw Gemini API response: {response.text}")
+        
         # Parse JSON response
         try:
-            articles = json.loads(response.text.strip("```json\n```"))
+            # Strip code block markers if present
+            cleaned_response = response.text.strip("```json\n```").strip()
+            articles = json.loads(cleaned_response)
             if not isinstance(articles, list):
-                logger.error("Gemini API response is not a valid JSON list")
+                logger.error(f"Gemini API response is not a valid JSON list: {cleaned_response}")
                 return []
             
             # Validate and clean articles
@@ -75,10 +83,10 @@ async def fetch_news_links(query: str) -> List[Dict[str, str]]:
             logger.info(f"Fetched {len(valid_articles)} valid articles from Gemini API")
             return valid_articles
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Gemini API response as JSON: {e}")
+            logger.error(f"Failed to parse Gemini API response as JSON: {e}, Raw response: {response.text}")
             return []
     except Exception as e:
-        logger.error(f"Error fetching news from Gemini API: {e}")
+        logger.error(f"Error fetching news from Gemini API: D{e}")
         return []
 
 # Function to rank articles based on query
